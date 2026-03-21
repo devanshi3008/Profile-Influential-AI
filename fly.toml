@@ -1,0 +1,36 @@
+app = "linkedin-impression-booster"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATA_DIR = "/data"
+  POSTING_TIMEZONE = "Asia/Kolkata"
+  OPTIMAL_POST_DAYS = "Tuesday,Wednesday,Thursday"
+  OPTIMAL_POST_HOUR = "8"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[mounts]]
+  source = "booster_data"
+  destination = "/data"
+
+[[crons]]
+  schedule = "30 3 * * 1"
+  command = "python scheduler.py --once content"
+
+[[crons]]
+  schedule = "30 4 * * *"
+  command = "python scheduler.py --once analyse"

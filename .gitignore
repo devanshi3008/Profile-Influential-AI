@@ -1,0 +1,25 @@
+.env
+*.env
+session/
+session.json
+
+# Database
+*.db
+*.sqlite
+personalisation.json
+performance_context.json
+drafts/
+logs/
+*.log
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+node_modules/
+ui/dist/
+ui/.vite/
+.DS_Store
+Thumbs.db
