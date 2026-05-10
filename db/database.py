@@ -8,9 +8,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from config import DB_PATH
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./linkedin_booster.db")
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
-engine = create_engine(DB_PATH, connect_args={"check_same_thread": False})
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

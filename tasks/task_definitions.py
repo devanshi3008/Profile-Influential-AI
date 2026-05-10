@@ -16,15 +16,17 @@ def _load_personalisation() -> dict:
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-def _get_dynamic_voice_context() -> str:
+def _get_dynamic_voice_context(custom_profile_url: Optional[str] = None, custom_name: Optional[str] = None) -> str:
     try:
-        tool = LinkedInProfileTool()
+        tool = LinkedInProfileTool(custom_profile_url=custom_profile_url)
         data = tool.get_profile_data()
-        if data.full_name == "Unknown":
+        
+        full_name = custom_name if custom_name else data.full_name
+        if full_name == "Unknown":
             return "Generic professional tone, helpful and insightful."
         
         context = (
-            f"Voice: {data.full_name} ({data.headline}). "
+            f"Voice: {full_name} ({data.headline}). "
             f"Location: {data.location}. "
             f"Experience: {data.years_experience or 'unknown'} total. "
             f"Current Role: {data.current_role} at {data.current_company}. "
@@ -38,8 +40,8 @@ def _get_dynamic_voice_context() -> str:
     except Exception as e:
         return "Insightful industry expert focusing on practical applications."
 
-def create_niche_analysis_task(agent) -> Task:
-    voice_context = _get_dynamic_voice_context()
+def create_niche_analysis_task(agent, custom_profile_url: Optional[str] = None, custom_name: Optional[str] = None) -> Task:
+    voice_context = _get_dynamic_voice_context(custom_profile_url, custom_name)
     return Task(
         description=(
             f"Analyze the following profile context: {voice_context}. "
@@ -56,8 +58,8 @@ from pydantic import BaseModel
 class PostDraftList(BaseModel):
     drafts: List[PostDraft]
 
-def create_content_generation_task(agent, niche_profile: NicheProfile, performance_context: Optional[str] = None) -> Task:
-    voice_context = _get_dynamic_voice_context()
+def create_content_generation_task(agent, niche_profile: NicheProfile, performance_context: Optional[str] = None, custom_profile_url: Optional[str] = None, custom_name: Optional[str] = None) -> Task:
+    voice_context = _get_dynamic_voice_context(custom_profile_url, custom_name)
     
     p = _load_personalisation()
     personalisation_context = ""
@@ -92,7 +94,9 @@ def create_content_generation_task(agent, niche_profile: NicheProfile, performan
         description=(
             f"Generate 5 high-impact LinkedIn posts based on this dynamic context:\n{context_str}\n\n"
             "CRITICAL: Write exactly in the derived voice. Use personal stories inferred from the bio. "
-            "Avoid generic buzzwords. Each post must feel authentic to the user's real career history."
+            "Avoid generic buzzwords. Each post must feel authentic to the user's real career history.\n\n"
+            "ID REQUIREMENT: For each post, generate a UNIQUE and RANDOM UUID for the 'post_id' field. "
+            "Do NOT use placeholder UUIDs like '123e4567-e89b-12d3-a456-426655440000'."
             f"{post_ideas_instr}"
         ),
         expected_output="A list of 5 PostDraft objects wrapped in a drafts field.",

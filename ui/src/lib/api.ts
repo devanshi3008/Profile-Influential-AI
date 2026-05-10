@@ -61,6 +61,20 @@ export interface PersonalisationData {
   phrases_to_avoid: string[];
 }
 
+export interface RunResult {
+  status: "processing" | "completed" | "failed" | "not_found";
+  current_step?: string;
+  progress?: number;
+  drafts?: PostDraft[];
+  schedules?: any[];
+  error?: string;
+}
+
+export function saveUserSession(data: { name: string; linkedinUrl: string }) {
+  sessionStorage.setItem("booster_user_name", data.name);
+  sessionStorage.setItem("booster_linkedin_url", data.linkedinUrl);
+}
+
 export interface PublishedPost {
   id: string;
   format_type: string;
@@ -87,8 +101,15 @@ export interface AnalyticsSummary {
 }
 
 export const api = {
-  getDashboardSummary: (): Promise<DashboardSummary> =>
-    fetch(`${BASE}/api/dashboard/summary`).then((r) => r.json()),
+  getDashboardSummary: (): Promise<any> => {
+    const name = sessionStorage.getItem("booster_user_name") || "";
+    const url = sessionStorage.getItem("booster_linkedin_url") || "";
+    const params = new URLSearchParams();
+    if (name) params.append("user_name", name);
+    if (url) params.append("linkedin_url", url);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return fetch(`${BASE}/api/dashboard/summary${qs}`).then((r) => r.json());
+  },
     
   getDrafts: (status: string = "all"): Promise<PostDraft[]> =>
     fetch(`${BASE}/api/drafts?status=${status}`).then((r) => r.json()),
@@ -121,4 +142,7 @@ export const api = {
 
   runCrew: (): Promise<{ status: string; message: string }> =>
     fetch(`${BASE}/api/crew/run`, { method: "POST" }).then((r) => r.json()),
+    
+  getRunResult: (taskId: string): Promise<RunResult> =>
+    fetch(`${BASE}/api/crew/result/${taskId}`).then((r) => r.json()),
 };

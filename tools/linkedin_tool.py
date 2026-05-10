@@ -1,15 +1,21 @@
 import os
 import json
 import logging
+import re
+import requests
 from dataclasses import dataclass, field
 from typing import List, Optional
 from dotenv import load_dotenv
 from crewai.tools import BaseTool
-from playwright.sync_api import sync_playwright
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ProfileData:
-    full_name: str = "Unknown"
+    full_name: str = ""
     headline: str = ""
     location: str = ""
     about: str = ""
@@ -22,108 +28,207 @@ class ProfileData:
     connections: str = ""
     profile_url: str = ""
 
+
+# ---------------------------------------------------------------------------
+# Strategy 1 — Proxycurl (paid but has a free trial with 10 credits)
+# Set PROXYCURL_API_KEY in your .env / Render env vars to enable this.
+# Sign up free at https://nubela.co/proxycurl
+# ---------------------------------------------------------------------------
+def _fetch_via_proxycurl(profile_url: str) -> Optional[ProfileData]:
+    api_key = os.getenv("PROXYCURL_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        resp = requests.get(
+            "https://nubela.co/proxycurl/api/v2/linkedin",
+            params={"url": profile_url, "skills": "include", "extra": "include"},
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Proxycurl returned {resp.status_code}")
+            return None
+
+        d = resp.json()
+
+        experiences = d.get("experiences") or []
+        current_exp = next((e for e in experiences if not e.get("ends_at")), experiences[0] if experiences else {})
+
+        educations = d.get("education") or []
+        edu_names = [e.get("school", "") for e in educations[:2] if e.get("school")]
+
+        skills_raw = d.get("skills") or []
+        skill_names = [s.get("name", "") for s in skills_raw[:10] if s.get("name")]
+
+        # Approximate total experience years from all roles
+        total_months = 0
+        for exp in experiences:
+            start = exp.get("starts_at") or {}
+            end   = exp.get("ends_at")   or {}
+            sy, sm = start.get("year", 0), start.get("month", 1)
+            if sy:
+                import datetime
+                now = datetime.date.today()
+                ey = end.get("year",  now.year)  if end else now.year
+                em = end.get("month", now.month) if end else now.month
+                total_months += max(0, (ey - sy) * 12 + (em - sm))
+        years_exp = f"{total_months // 12}+ years" if total_months else ""
+
+        return ProfileData(
+            full_name       = f"{d.get('first_name', '')} {d.get('last_name', '')}".strip(),
+            headline        = d.get("headline", ""),
+            location        = d.get("city", "") or d.get("country_full_name", ""),
+            about           = d.get("summary", ""),
+            current_role    = current_exp.get("title", ""),
+            current_company = current_exp.get("company", ""),
+            years_experience= years_exp,
+            skills          = skill_names,
+            recent_posts    = [],           # Proxycurl free tier doesn't include posts
+            education       = edu_names,
+            connections     = str(d.get("connections", "") or ""),
+            profile_url     = profile_url,
+        )
+    except Exception as e:
+        logger.error(f"Proxycurl fetch failed: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Strategy 2 — RapidAPI "Fresh LinkedIn Profile Data" (free 100 req/month)
+# Set RAPIDAPI_KEY in your .env / Render env vars to enable this.
+# Subscribe free at https://rapidapi.com/freshdata-freshdata-default/api/fresh-linkedin-profile-data
+# ---------------------------------------------------------------------------
+def _fetch_via_rapidapi(profile_url: str) -> Optional[ProfileData]:
+    api_key = os.getenv("RAPIDAPI_KEY")
+    if not api_key:
+        return None
+
+    try:
+        resp = requests.get(
+            "https://fresh-linkedin-profile-data.p.rapidapi.com/get-linkedin-profile",
+            params={"linkedin_url": profile_url, "include_skills": "true"},
+            headers={
+                "X-RapidAPI-Key": api_key,
+                "X-RapidAPI-Host": "fresh-linkedin-profile-data.p.rapidapi.com",
+            },
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"RapidAPI returned {resp.status_code}")
+            return None
+
+        d = resp.json().get("data", {})
+        if not d:
+            return None
+
+        experiences = d.get("experiences") or []
+        current_exp = next((e for e in experiences if e.get("is_current")), experiences[0] if experiences else {})
+
+        educations  = d.get("educations") or []
+        edu_names   = [e.get("school", "") for e in educations[:2] if e.get("school")]
+
+        skills_raw  = d.get("skills") or []
+        skill_names = [s.get("name", s) if isinstance(s, dict) else str(s) for s in skills_raw[:10]]
+
+        return ProfileData(
+            full_name       = d.get("full_name", ""),
+            headline        = d.get("headline", ""),
+            location        = d.get("location", ""),
+            about           = d.get("about", ""),
+            current_role    = current_exp.get("title", ""),
+            current_company = current_exp.get("company", ""),
+            years_experience= "",
+            skills          = skill_names,
+            recent_posts    = [],
+            education       = edu_names,
+            connections     = str(d.get("connections_count", "") or ""),
+            profile_url     = profile_url,
+        )
+    except Exception as e:
+        logger.error(f"RapidAPI fetch failed: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Strategy 3 — Manual fallback using data the user already gave us at /setup
+# Reads from LINKEDIN_USER_NAME and LINKEDIN_USER_HEADLINE env vars which
+# the setup endpoint writes automatically (see main.py patch below).
+# Zero external calls, always works, no scraping needed.
+# ---------------------------------------------------------------------------
+def _build_from_env_fallback(profile_url: str, custom_name: Optional[str] = None) -> ProfileData:
+    name = (
+        custom_name
+        or os.getenv("LINKEDIN_USER_NAME", "")
+        or _extract_name_from_url(profile_url)
+    )
+    return ProfileData(
+        full_name   = name,
+        headline    = os.getenv("LINKEDIN_USER_HEADLINE", ""),
+        location    = os.getenv("LINKEDIN_USER_LOCATION", ""),
+        about       = os.getenv("LINKEDIN_USER_ABOUT", ""),
+        current_role= os.getenv("LINKEDIN_USER_ROLE", ""),
+        connections = os.getenv("LINKEDIN_USER_CONNECTIONS", ""),
+        skills      = _parse_list_env("LINKEDIN_USER_SKILLS"),
+        profile_url = profile_url,
+    )
+
+
+def _extract_name_from_url(url: str) -> str:
+    """linkedin.com/in/john-doe-123 → 'John Doe'"""
+    try:
+        slug = url.rstrip("/").split("/in/")[-1].split("/")[0]
+        parts = re.split(r"[-_]", slug)
+        name_parts = [p.capitalize() for p in parts if not p.isdigit() and len(p) > 1]
+        return " ".join(name_parts[:3])
+    except Exception:
+        return ""
+
+
+def _parse_list_env(key: str) -> List[str]:
+    raw = os.getenv(key, "")
+    if not raw:
+        return []
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
+# ---------------------------------------------------------------------------
+# CrewAI Tool wrapper
+# ---------------------------------------------------------------------------
 class LinkedInProfileTool(BaseTool):
     name: str = "LinkedIn Profile Analyzer"
-    description: str = "Fetches comprehensive LinkedIn profile data for the logged-in user."
-    
+    description: str = (
+        "Fetches LinkedIn profile data for the target user. "
+        "Returns name, headline, location, about, role, company, skills, education."
+    )
+    custom_profile_url: Optional[str] = None
+    custom_name: Optional[str] = None
+
     def _run(self) -> str:
         data = self.get_profile_data()
         return json.dumps(data.__dict__)
 
     def get_profile_data(self) -> ProfileData:
         load_dotenv()
-        profile_url = os.getenv("LINKEDIN_PROFILE_URL", "https://www.linkedin.com/in/me/")
-        
-        session_file = os.path.join("session", "session.json")
-        if not os.path.exists(session_file):
-            logging.error("Session file not found.")
-            return ProfileData()
-            
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context(storage_state=session_file)
-                page = context.new_page()
-                
-                logging.info(f"Navigating to {profile_url}...")
-                page.goto(profile_url, wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
-                
-                # Robust Selector Logic with Safe Fallbacks
-                data = ProfileData(profile_url=page.url)
-                
-                # 1. Full Name
-                try:
-                    data.full_name = page.locator("h1").first.inner_text().strip()
-                except: pass
-                
-                # 2. Headline
-                try:
-                    data.headline = page.locator(".text-body-medium").first.inner_text().strip()
-                except: pass
-                
-                # 3. Location
-                try:
-                    data.location = page.locator(".text-body-small.inline.t-black--light").first.inner_text().strip()
-                except: pass
-                
-                # 4. Connections
-                try:
-                    conn_text = page.locator("ul.pv-top-card--list li.text-body-small").first.inner_text()
-                    if "connections" in conn_text.lower():
-                        data.connections = conn_text.strip()
-                except: pass
+        profile_url = (
+            self.custom_profile_url
+            or os.getenv("LINKEDIN_PROFILE_URL", "")
+        )
 
-                # 5. About section
-                try:
-                    about_section = page.locator("section:has-text('About')").first
-                    if about_section.count() > 0:
-                        data.about = about_section.locator(".display-flex.ph5.pv3").inner_text().strip()
-                except: pass
-                
-                # 6. Experience and Years
-                try:
-                    exp_items = page.locator("#experience").locator("..").locator("li.pvs-list__paged-list-item").all()
-                    if exp_items:
-                        first_exp = exp_items[0]
-                        data.current_role = first_exp.locator(".t-bold span").first.inner_text().strip()
-                        data.current_company = first_exp.locator(".t-normal span").first.inner_text().split("·")[0].strip()
-                        
-                        # Total years (heuristic: look for "yrs" or "years" in the whole section)
-                        exp_text = page.locator("#experience").locator("..").inner_text()
-                        import re
-                        matches = re.findall(r"(\d+)\s+(?:yrs|years)", exp_text)
-                        if matches:
-                            total_years = sum(int(m) for m in matches)
-                            data.years_experience = f"{total_years}+ years"
-                except: pass
+        if not profile_url:
+            logger.warning("No LinkedIn URL provided — using env fallback.")
+            return _build_from_env_fallback("", self.custom_name)
 
-                # 7. Education
-                try:
-                    edu_items = page.locator("#education").locator("..").locator("li.pvs-list__paged-list-item").all()
-                    data.education = [item.locator(".t-bold span").first.inner_text().strip() for item in edu_items[:2]]
-                except: pass
+        # Try API strategies in order of reliability
+        for strategy in (_fetch_via_proxycurl, _fetch_via_rapidapi):
+            result = strategy(profile_url)
+            if result and result.full_name:
+                logger.info(f"Profile fetched via {strategy.__name__}: {result.full_name}")
+                # If we got a name from API but custom_name was provided, prefer custom
+                if self.custom_name and not result.full_name:
+                    result.full_name = self.custom_name
+                return result
 
-                # 8. Skills (Separate Page)
-                try:
-                    page.goto("https://www.linkedin.com/in/me/details/skills/", wait_until="domcontentloaded", timeout=60000)
-                    page.wait_for_timeout(3000)
-                    skill_items = page.locator(".pvs-list__paged-list-item .t-bold").all()
-                    data.skills = [s.inner_text().strip() for s in skill_items[:10]]
-                    page.go_back()
-                except: pass
-
-                # 9. Recent Posts (Heuristic from main page or activity)
-                try:
-                    # Look for the 'Activity' section snippet
-                    activity_section = page.locator("section:has-text('Activity')").first
-                    if activity_section.count() > 0:
-                        posts = activity_section.locator(".pvs-list__paged-list-item").all()
-                        data.recent_posts = [p.inner_text().split("\n")[0][:100] for p in posts[:3]]
-                except: pass
-
-                browser.close()
-                return data
-        except Exception as e:
-            logging.error(f"Scraping failed: {e}")
-            return ProfileData(full_name="", headline="", location="", about="", current_role="", current_company="", years_experience="", connections="", profile_url="")
+        # All API strategies failed — use what the user already told us
+        logger.info("All API strategies failed — using env/form fallback.")
+        return _build_from_env_fallback(profile_url, self.custom_name)

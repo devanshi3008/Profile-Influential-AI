@@ -1,0 +1,65 @@
+# render.yaml — drop this in your project root
+# Deploy at: https://dashboard.render.com/new/blueprint
+
+services:
+  - type: web
+    name: li-booster
+    runtime: python
+    region: oregon
+    plan: free
+
+    buildCommand: |
+      pip install -r requirements.txt
+      cd ui && npm install && npm run build && cd ..
+      mkdir -p ui/dist
+
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+
+    envVars:
+      # ── Required ───────────────────────────────────────────────
+      - key: GROQ_API_KEY
+        sync: false          # fill in Render dashboard
+
+      - key: LINKEDIN_PROFILE_URL
+        sync: false          # e.g. https://www.linkedin.com/in/your-slug/
+
+      # ── Profile fallback (shown when no API key set) ───────────
+      # These let the dashboard show real data without any scraping.
+      # Fill them in Render → Environment → Add variable
+      - key: LINKEDIN_USER_NAME
+        sync: false
+
+      - key: LINKEDIN_USER_HEADLINE
+        sync: false
+
+      - key: LINKEDIN_USER_LOCATION
+        sync: false
+
+      - key: LINKEDIN_USER_ABOUT
+        sync: false
+
+      - key: LINKEDIN_USER_ROLE
+        sync: false
+
+      - key: LINKEDIN_USER_CONNECTIONS
+        sync: false
+
+      - key: LINKEDIN_USER_SKILLS
+        sync: false          # comma-separated: "Python, FastAPI, LLMs"
+
+      # ── Optional API keys for live profile scraping ────────────
+      # Proxycurl: free 10 credits → https://nubela.co/proxycurl
+      - key: PROXYCURL_API_KEY
+        sync: false
+
+      # RapidAPI Fresh LinkedIn: free 100 req/month
+      # → https://rapidapi.com/freshdata-freshdata-default/api/fresh-linkedin-profile-data
+      - key: RAPIDAPI_KEY
+        sync: false
+
+      # ── Runtime ────────────────────────────────────────────────
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+
+      - key: DATABASE_URL
+        sync: false          # optional: add a Render Postgres DB URL here

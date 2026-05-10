@@ -31,23 +31,31 @@ from config import PERFORMANCE_CONTEXT_FILE
 load_dotenv()
 
 class LinkedInBoosterCrew:
-    def __init__(self, rerun=False):
+    def __init__(self, rerun=False, custom_groq_key=None, custom_linkedin_url=None, custom_name=None, progress_callback=None):
         self.rerun = rerun
         self.db = DatabaseManager()
+        self.custom_name = custom_name
+        self.custom_linkedin_url = custom_linkedin_url
+        self.progress_callback = progress_callback
+
+        groq_key = custom_groq_key or os.getenv("GROQ_API_KEY")
 
         self.gemini_pro = LLM(
             model="groq/llama-3.3-70b-versatile",
-            api_key=os.getenv("GROQ_API_KEY"),
+            api_key=groq_key,
             temperature=0.3
         )
 
         self.gemini_flash = LLM(
             model="groq/llama-3.3-70b-versatile",
-            api_key=os.getenv("GROQ_API_KEY"),
+            api_key=groq_key,
             temperature=0.7
         )
 
-        self.linkedin_tool = LinkedInProfileTool()
+        self.linkedin_tool = LinkedInProfileTool(
+            custom_profile_url=custom_linkedin_url,
+            custom_name=custom_name
+        )
         self.web_search_tool = TrendingTopicsTool()
         self.analytics_tool = LinkedInAnalyticsTool()
 
@@ -67,6 +75,8 @@ class LinkedInBoosterCrew:
             return None
 
     def run_content_cycle(self) -> list:
+        if self.progress_callback: self.progress_callback("Fetching Profile", 15)
+        
         niche_agent = create_niche_finder_agent(self.gemini_pro, [self.linkedin_tool])
         content_agent = create_content_creator_agent(self.gemini_flash, [self.web_search_tool])
         scheduler_agent = create_post_scheduler_agent(self.gemini_flash)
@@ -75,9 +85,11 @@ class LinkedInBoosterCrew:
         niche_profile_model = self.db.get_latest_niche_profile()
         
         if self._should_rerun_niche() or self.rerun:
-            niche_task = create_niche_analysis_task(niche_agent)
+            if self.progress_callback: self.progress_callback("Analyzing Profile", 30)
+            niche_task = create_niche_analysis_task(niche_agent, custom_profile_url=self.custom_linkedin_url, custom_name=self.custom_name)
             tasks.append(niche_task)
         else:
+            if self.progress_callback: self.progress_callback("Analyzing Profile", 30)
             niche_task = None
             
         perf_context = self._load_performance_context()
@@ -95,7 +107,9 @@ class LinkedInBoosterCrew:
 
         niche_obj = DummyNiche() if niche_task else LoadedNiche(niche_profile_model)
         
-        content_task = create_content_generation_task(content_agent, niche_obj, perf_context)
+        if self.progress_callback: self.progress_callback("Finding Niche", 45)
+        
+        content_task = create_content_generation_task(content_agent, niche_obj, perf_context, custom_profile_url=self.custom_linkedin_url, custom_name=self.custom_name)
         if niche_task:
             content_task.context = [niche_task]
         tasks.append(content_task)
@@ -108,20 +122,35 @@ class LinkedInBoosterCrew:
         if niche_task:
             agents.insert(0, niche_agent)
             
+        if self.progress_callback: self.progress_callback("Generating Strategy", 75)
+            
+        self._step_count = 0
+        def step_handler(step):
+            self._step_count += 1
+            if self._step_count == 3 and self.progress_callback:
+                self.progress_callback("Audience Analysis", 60)
+            elif self._step_count == 7 and self.progress_callback:
+                self.progress_callback("Generating Posts", 88)
+
         crew = Crew(
             agents=agents,
             tasks=tasks,
             process=Process.sequential,
             memory=False,
-            verbose=True
+            verbose=True,
+            step_callback=step_handler
         )
         
         crew.kickoff()
+        
+        if self.progress_callback: self.progress_callback("Finalizing", 97)
         
         if niche_task and niche_task.output.pydantic:
             niche_data = niche_task.output.pydantic.model_dump()
             self.db.save_niche_profile(niche_data)
             
+        if self.progress_callback: self.progress_callback("Saving Drafts", 93)
+
         drafts = []
         post_drafts_output = content_task.output.pydantic
         if post_drafts_output and hasattr(post_drafts_output, 'drafts'):
@@ -132,6 +161,9 @@ class LinkedInBoosterCrew:
                 saved_draft = self.db.save_post_draft(draft_data)
                 drafts.append(saved_draft)
 
+        if self.progress_callback: self.progress_callback("Scheduling Posts", 96)
+
+        schedules_list = []
         schedule_decisions = schedule_task.output.pydantic
         if schedule_decisions and hasattr(schedule_decisions, 'schedules'):
             for idx, decision in enumerate(schedule_decisions.schedules):
@@ -145,7 +177,32 @@ class LinkedInBoosterCrew:
                         "status": "scheduled"
                     })
                     
-        return drafts
+                    schedules_list.append({
+                        "post_draft_id": str(draft_id),
+                        "scheduled_at": scheduled_at.isoformat(),
+                        "status": "scheduled"
+                    })
+                    
+        # Ensure we return serializable dictionaries for the frontend API
+        drafts_list = [
+            {
+                "id": str(d.post_id),
+                "niche": d.niche,
+                "hook": d.hook,
+                "body": d.body,
+                "cta": d.cta,
+                "hashtags": d.hashtags,
+                "format_type": d.format_type,
+                "estimated_read_time": d.estimated_read_time,
+                "created_at": d.created_at.isoformat() if hasattr(d.created_at, 'isoformat') else str(d.created_at),
+                "status": "pending"
+            } for d in drafts
+        ] if drafts else []
+
+        return {
+            "drafts": drafts_list,
+            "schedules": schedules_list
+        }
 
     def run_analysis_cycle(self, post_ids: list[str]) -> list:
         analyst_agent = create_performance_analyst_agent(self.gemini_pro, [self.analytics_tool])
