@@ -44,7 +44,7 @@ export function Sidebar() {
   
   const initials = fullName
     .split(" ")
-    .map(w => w[0])
+    .map((w: string) => w[0])
     .join("")
     .slice(0, 2)
     .toUpperCase() || "LI";

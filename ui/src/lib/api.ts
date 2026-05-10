@@ -46,6 +46,7 @@ export interface PostDraft {
   cta: string;
   hashtags: string[];
   format_type: string;
+  niche?: string;
   estimated_read_time: number;
   created_at: string;
   status: "pending" | "approved" | "rejected" | "published";
