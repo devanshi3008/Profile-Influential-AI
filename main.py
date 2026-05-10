@@ -1,4 +1,6 @@
 import argparse
+import uvicorn
+import subprocess
 from rich.console import Console
 from rich.table import Table
 
@@ -78,7 +80,7 @@ def print_status():
 
 def main():
     parser = argparse.ArgumentParser(description="LinkedIn Impression Booster CLI")
-    parser.add_argument("command", choices=["run", "analyse", "status"], help="Command to execute")
+    parser.add_argument("command", choices=["run", "analyse", "status", "serve", "schedule"], help="Command to execute")
     
     args = parser.parse_args()
     
@@ -88,6 +90,12 @@ def main():
         run_analysis_cycle()
     elif args.command == "status":
         print_status()
+    elif args.command == "serve":
+        console.print("[bold green]Starting API Server...[/bold green]")
+        uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)
+    elif args.command == "schedule":
+        console.print("[bold blue]Starting Autonomous Scheduler...[/bold blue]")
+        subprocess.run(["python", "scheduler.py"])
 
 if __name__ == "__main__":
     main()
