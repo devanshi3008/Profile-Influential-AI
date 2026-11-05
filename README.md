@@ -1,14 +1,15 @@
-# LinkedIn Impression Booster
+# Profile Influential AI
 
 A 4-agent AI system built with CrewAI and Google Gemini that autonomously manages LinkedIn content to maximise impressions and reach.
 
 ## Project Overview
 
-The LinkedIn Impression Booster runs as an automated pipeline with four specialized agents:
-1. **Niche Finder (Agent 1)**: Dynamically extracts your `ProfileData` (headline, bio, career history, skills) to define your authentic professional persona.
-2. **Content Creator (Agent 2)**: Generates 5 high-impact post drafts per week using real-time voice context derived directly from your profile.
-3. **Post Scheduler (Agent 3)**: Schedules and publishes the drafts at statistically optimal times.
-4. **Performance Analyst (Agent 4)**: Analyzes metrics and feeds recommendations back into the next cycle for continuous improvement.
+Profile Influential AI runs as an automated pipeline with four specialized agents:
+
+1. **Niche Finder (Agent 1):** Dynamically extracts your `ProfileData` (headline, bio, career history, skills) to define your authentic professional persona.
+2. **Content Creator (Agent 2):** Generates 5 high-impact post drafts per week using real-time voice context derived directly from your profile.
+3. **Post Scheduler (Agent 3):** Schedules and publishes the drafts at statistically optimal times.
+4. **Performance Analyst (Agent 4):** Analyzes metrics and feeds recommendations back into the next cycle for continuous improvement.
 
 ## Prerequisites
 
@@ -19,35 +20,42 @@ The LinkedIn Impression Booster runs as an automated pipeline with four speciali
 
 ## Setup Instructions
 
-1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd linkedin_booster
-   ```
+### 1. Clone the Repository
 
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   playwright install chromium
-   ```
+```bash
+git clone <repository-url>
+cd linkedin_booster
+```
 
-3. **Configure Environment Variables:**
-   Copy `.env.example` to `.env` and fill in your credentials:
-   ```bash
-   cp .env.example .env
-   ```
+### 2. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 3. Configure Environment Variables
+
+Copy `.env.example` to `.env` and fill in your credentials:
+
+```bash
+cp .env.example .env
+```
 
 ### Obtaining API Credentials
 
 **Google Gemini API:**
+
 1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey).
 2. Create an API key and add it to `GEMINI_API_KEY`.
 
 **Tavily API:**
+
 1. Sign up at [Tavily](https://tavily.com/).
 2. Get your API key and add it to `TAVILY_API_KEY`.
 
 **LinkedIn API v2:**
+
 1. Go to the [LinkedIn Developer Portal](https://www.linkedin.com/developers/).
 2. Create an App.
 3. Request access to the **Share on LinkedIn** and **Sign In with LinkedIn using OpenID Connect** products. For Analytics, you'll need the **Advertising API** or similar access depending on your account type.
@@ -88,8 +96,9 @@ python scheduler.py
 ```
 
 This will run:
-- **Content Cycle**: Every Monday at 9:00 AM (in your configured timezone).
-- **Analysis Cycle**: Every day at 10:00 AM, analyzing any mapped posts that reach the 48-hour age threshold.
+
+- **Content Cycle:** Every Monday at 9:00 AM (in your configured timezone).
+- **Analysis Cycle:** Every day at 10:00 AM, analyzing any mapped posts that reach the 48-hour age threshold.
 
 ## Database
 
